@@ -25,7 +25,7 @@ class AutoEncoder(nn.Module):
     
     def __init__( self, encoder_struct, decoder_struct, input_size, latent_size, device):
         super(AutoEncoder, self).__init__()
-        self.name = "AutoEncoder"
+        self.name = "VariationalAutoEncoder"
         self.encoder_struct = encoder_struct
         self.decoder_struct = decoder_struct
         self.input_size = input_size
@@ -34,12 +34,18 @@ class AutoEncoder(nn.Module):
         self.batch_size = 1
         self.device = device
         
+        self.latent_mu = 0.
+        self.latent_sigma = 1.
+        
+        
         """
         Construct neural network layers from subclasses
         """
         
         self.encoder = Coder("Encoder", self.encoder_struct, self.input_size, self.latent_size)
         self.decoder = Coder("Decoder", self.decoder_struct, self.latent_size, self.output_size)
+        
+        self.dist = torch.distributions.Normal(loc=0.0, scale=1.0)
 
     """
     the forward function is called each the the network is propagating forward
@@ -49,8 +55,30 @@ class AutoEncoder(nn.Module):
     def forward(self, input_data):
         #print("Encoding...\n")
         latent_data = self.encoder(input_data)
+        #print(latent_data)
+        
+        #print("Sampling...\n")
+        self.latent_mu = latent_data[:,:int(self.latent_size/2)]
+        self.log_latent_sigma = latent_data[:,int(self.latent_size/2):]
+        
+        #This creates a node through which backpropagation does not work
+        #dist = torch.distributions.Normal(self.latent_mu, torch.exp(self.latent_sigma))
+        #latent_sample = dist.sample((1,))
+        
+        #Use the reparametrization trick!
+        latent_z = self.dist.sample(self.latent_mu.size()).to(self.device)
+        #print(f"latenz_z {latent_z}")
+        #print(f"mu {self.latent_mu}")
+        #print(f"log_sigma {self.log_latent_sigma}")
+        #print(f"sigma {torch.exp(self.log_latent_sigma)}")
+        
+        latent_sample = self.latent_mu + torch.exp(0.5*self.log_latent_sigma)*latent_z
+        #print(latent_sample)
+        
         #print("Decoding...\n")
-        x = self.decoder(latent_data)
+        x = self.decoder(latent_sample)
+        
+        #x = self.decoder(latent_data)
         return x
     
     """
@@ -61,7 +89,8 @@ class AutoEncoder(nn.Module):
     def init_weights(self, init_routine):
         print(f"Initializing weights of {self.name} with method {init_routine}\n")
         for i, layer in enumerate(self.layers):
-            if type(layer) == nn.Linear:
+            #if type(layer) == nn.Linear:
+            if type(layer) in [nn.Linear, nn.Conv2d]:
                 #torch.nn.init.xavier_normal_(layer.weight)
                 init_routine(layer.weight)
                 #if self.net_struct[i]["bias"] == True:
@@ -80,7 +109,7 @@ class AutoEncoder(nn.Module):
     
     def get_net_struct(self):
         return self.net_struct
-    
+
     def get_input_size(self):
         return self.input_size
 
@@ -104,7 +133,8 @@ class AutoEncoder(nn.Module):
     def set_batch_size(self, batch_size):
         self.batch_size = batch_size
         
-    
+    def get_latent_variables(self):
+        return (self.latent_mu, self.log_latent_sigma)
     
 """
 Encoder and Decoder have similar structure
@@ -154,6 +184,7 @@ class Coder(AutoEncoder):
                 x = z
 
             #print(x)
+            #print(x.shape)
 
         return x
     
