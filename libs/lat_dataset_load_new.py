@@ -106,7 +106,10 @@ class kl_dataset(torch.utils.data.Dataset):
             num_confs = confs.size()[0]
             
             #iterate through all configurations from one file
-            for num_conf in tqdm(range(num_confs)):
+            #for num_conf in tqdm(range(num_confs)):
+            """LEAVE OUT THE FIRST 40% OF CONFIGURATIONS"""
+            start_conf = int(num_confs*0.2)
+            for num_conf in tqdm(range(start_conf,num_confs)):
                 #pick out conf and labels for one example
                 conf = confs[num_conf]
                 label = labels_array[:,num_conf]
@@ -205,6 +208,7 @@ class kl_dataset(torch.utils.data.Dataset):
     def filter_indices_label_vals(self, label_names, label_values, remove=False):
         
         filtered_indices = []
+        removed_indices = []
         
         print(f"Filtering indices with respect to labels {label_names}, remove = {remove}")
         
@@ -216,6 +220,7 @@ class kl_dataset(torch.utils.data.Dataset):
                     if example[label_name] not in label_values[label_i]:
                         include = False
                         """break out of label_i loop, because it is clear to not include this example"""
+                        removed_indices.append(ex_i)
                         break
             
             """Exclude all examples with labels in label_values"""            
@@ -224,12 +229,13 @@ class kl_dataset(torch.utils.data.Dataset):
             #        if example[label_name] in label_values[label_i]:
             #            include = False
             #            """break out of label_i loop, because it is clear to not include this example"""
+            #            removed_indices.append(ex_i)
             #            break
                     
             if include == True:
                 filtered_indices.append(ex_i)
                 
-        return filtered_indices
+        return filtered_indices, removed_indices
             
         
     def get_length(self):

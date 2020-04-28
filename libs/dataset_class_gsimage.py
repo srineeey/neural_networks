@@ -57,6 +57,7 @@ class image_dataset(torch.utils.data.Dataset):
             self.images[idx] = image
         
         self.images = torch.tensor(self.images).to(device)
+        #self.images = torch.tensor(self.images)
 
     """function that spits out the databases length"""
     def __len__(self):

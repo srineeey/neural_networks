@@ -341,8 +341,8 @@ def calc_layer_sizes(input_shape, net_struct, log_file=None):
     #go through each layer
     for i in range(len(net_struct)):
         new_layer_size = []
-        print(i)
-        print(net_struct[i]["type"])
+        #print(i)
+        #print(net_struct[i]["type"])
         
         if net_struct[i]["type"] == nn.Linear:
             new_layer_size = net_struct[i]["layer_pars"]["out_features"]
@@ -355,30 +355,78 @@ def calc_layer_sizes(input_shape, net_struct, log_file=None):
             
         #elif (net_struct[i]["type"] == nn.Conv2d) or (net_struct[i]["type"] == nn.MaxPool2d):
         elif net_struct[i]["type"] in [nn.Conv2d, nn.MaxPool2d, nn.AvgPool2d]:
+            
             kernel_shape = net_struct[i]["layer_pars"]["kernel_size"]
-            stride = net_struct[i]["layer_pars"]["stride"]
-            padding = net_struct[i]["layer_pars"]["padding"]
-            print(kernel_shape)
+            
+            if net_struct[i]["type"] == nn.Conv2d:
+                stride = [1 for i in range(len(kernel_shape))]
+            else:
+                stride = kernel_shape
+            
+            padding_mode = "zeros"
+            padding = [0 for i in range(len(kernel_shape))]
+            dilation = [1 for i in range(len(kernel_shape))]
+            
+            if "stride" in net_struct[i]["layer_pars"]:
+                stride = net_struct[i]["layer_pars"]["stride"]
+                
+            if "padding" in net_struct[i]["layer_pars"]:
+                padding = net_struct[i]["layer_pars"]["padding"]
+
+            if "padding_mode" in net_struct[i]["layer_pars"]:
+                padding_mode = net_struct[i]["layer_pars"]["padding_mode"]
+                
+                #circular padding required specific values
+                #bug of pytorch
+                #works only for odd kernel sizes!!!
+                if padding_mode == "circular":
+                    padding = [int((kernel_l-1))//2 for kernel_l in kernel_shape]
+                    
+                    if not(np.all(padding == net_struct[i]["layer_pars"]["padding"])):
+                           print("padding size possibly incorrect!")
+            
+            if "dilation" in net_struct[i]["layer_pars"]:
+                dilation = net_struct[i]["layer_pars"]["dilation"]
+                
+            #print(kernel_shape)
             #new_layer_size = []
             
             for d in range(len(kernel_shape)):
                 #get length of the previous layer in dimension d
                 #layer_sizes[n][0] = number of channels!
-                print(f"last layer {layer_sizes[-1]}")
+                #print(f"last layer {layer_sizes[-1]}")
                 prev_layer_l = int(layer_sizes[-1][d+1])
                 kernel_l = int(kernel_shape[d])
+                
+                #padding_l = int(padding[d])
+                
                 if type(stride) == int:
                     stride_l = stride
                 elif type(stride) == list:
                     stride_l = int(stride[d])
+                    
+                if type(padding) == int:
+                    padding_l = padding
+                elif type(padding) == list:
+                    padding_l = int(padding[d])
+                    
+                if type(dilation) == int:
+                    dilation_l = dilation
+                elif type(padding) == list:
+                    dilation_l = int(dilation[d])
 
-                #actual conputation
-                if (prev_layer_l - kernel_l) % stride_l == 0:
-                    new_layer_size.append( (prev_layer_l + 2*padding - kernel_l)//stride_l + 1 )
+                #actual computation
+                #if (prev_layer_l + 2*padding_l - kernel_l) % stride_l == 0:
+                if (prev_layer_l + 2*padding_l - dilation_l*(kernel_l - 1) - 1) % stride_l == 0:
+                    #new_layer_size_l = (prev_layer_l + 2*padding_l - kernel_l)//stride_l + 1
+                    new_layer_size_l = int(np.floor( (prev_layer_l + 2*padding_l - dilation_l*(kernel_l - 1) - 1)/(stride_l) + 1.))
+                    new_layer_size.append( new_layer_size_l )
                 else:
-                    pass
+                    #pass
+                    print(f"Input {layer_sizes[-1]} not compatible with:")
+                    print(net_struct[i]['layer_pars'])
                     #raise ValueError(f'Input {layer_sizes[-1]}, kernel {kernel_shape}, stride {stride} and padding {padding} in layer {i} not compatible!')
-                print(f"new layer {new_layer_size}")
+                #print(f"new layer {new_layer_size}")
 
             if net_struct[i]["type"] == nn.Conv2d:
                 new_layer_size = [net_struct[i]["layer_pars"]["out_channels"]] + new_layer_size
@@ -415,7 +463,7 @@ def calc_layer_sizes(input_shape, net_struct, log_file=None):
             new_layer_size = layer_sizes[-1]
         
         else:
-            print("custom layer operation not defined, assuming previous layer_size")
+            #print("custom layer operation not defined, assuming previous layer_size")
             new_layer_size = layer_sizes[-1]
         
         #append newly calculated neuron activation shape to layer_sizes
