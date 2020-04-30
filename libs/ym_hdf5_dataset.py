@@ -9,14 +9,19 @@ import os
 import glob
 import time
 
+import sys
+
 import torch
 from tqdm.notebook import tqdm
 
 import pytorch_lightning as pl
 
+sys.path.insert(1,"/home/sbulusu/qcd_ml/neural_networks/libs/")
+import utils
+
 """data set class"""
 
-class kl_dataset(torch.utils.data.Dataset):
+class ym_hdf5_dataset(torch.utils.data.Dataset):
 
     """
     class constructor
@@ -24,7 +29,7 @@ class kl_dataset(torch.utils.data.Dataset):
     the location of features (samples) and labels are stored as indices
     """
 
-    def __init__(self, conf_file_dir, file_format_list, lat_size, output_size, label_names, train_label_names, transform=None, device=torch.device("cpu")):
+    def __init__(self, conf_file_dir, file_format_list, lat_size, output_size, transform=None, device=torch.device("cpu")):
         self.device = device
         
         #save the firectory where conf files are saved
@@ -37,9 +42,6 @@ class kl_dataset(torch.utils.data.Dataset):
         #if lat_size is given in regular order x,y,z,... -> reverse it
         #self.lat_size = lat_size[::-1]
         
-        """INDEX ORDER CONFUSING"""
-        #conf size given as array [degree of freedom, direction, z_l,y_l,x_l]
-        self.conf_size = conf_size
         #output size is the size with which the configurations are loaded into the network (similar but not always identical to conf_size)
         self.output_size = output_size
         
@@ -57,105 +59,67 @@ class kl_dataset(torch.utils.data.Dataset):
             
         #print(self.conf_file_paths)
         
+
         #set the labels to look for in separate files
-        self.label_names = []
         
         #set labels used in training
-        self.train_label_names = self.label_names
+        #self.train_label_names = train_label_names
+        self.train_label_names = []
         
         #each example is saved as a dictionary with the label name as key to the label
         #examples are aggregated into this list
         self.data = []
         
+        self.params_names = ["dims"]
+        
+        self.params = {}
 
         #iterate through all conf_files
         for conf_file_i in tqdm(range(len(self.conf_file_paths))):
-        #for conf_file_i in tqdm(range(0,3)):
-            #read in configuration, reshape it and load it to device as a torch tensor
-            conf_file_path = self.conf_file_paths[conf_file_i]
-            h5py_conf = h5py.File(conf_file_path)
-            
-            for conf_i in range(len(h5py_conf['y'])):
-                
-            
-            confs = confs.reshape(read_shape)
-            confs = torch.tensor(confs, dtype=complex64)
-            #confs = torch.tensor(confs, dtype=int, device=device)
-            #print(confs)
-            
-            #send entire file to device, instead of one conf at a time
-            #confs.to(device)
-            
-            """CHANGE LOADING OF MU AND LABELS"""
-            """ADD SOME KIND OF ID"""
-            #separate entire path from filename
-            file_name = conf_file_path.split("/")[-1]
-            #isolate chemical potential out of filename.  delimiter = -
-            #configs-pars-mu.ext
-            file_ext = "." + file_name.split(".")[-1]
-            #split .ext from mu.ext
-            mu = torch.tensor(float( file_name.split("-")[-1].replace(file_ext,"") ))
-            
-            #load labels
-            #label file names should have identical name as conf file with "label_name" replacing "configs"
-            labels_array = []
-            conf_prefix = "configs"
-            for label_name in self.label_names:
-                #label_name = "n"
-                label_file_path = conf_file_path.replace(conf_prefix, label_name)
-                labels_array.append( np.fromfile(label_file_path, sep="\n", dtype=float) )
-            
-            labels_array = torch.tensor(labels_array)
-            #labels_array.to(device)
-            
-            print(f"Read conf file {conf_file_path} with size :{confs.size()}")
-            num_confs = confs.size()[0]
-            
-            #iterate through all configurations from one file
-            #for num_conf in tqdm(range(num_confs)):
-            skip_p = 0.3
-            start_conf = int(num_confs*skip_p)
-            print(f"skipping {skip_p} of configurations (warm up)")
-            for num_conf in tqdm(range(start_conf,num_confs)):
-                #pick out conf and labels for one example
-                conf = confs[num_conf]
-                #conf.to(device)
-                label = labels_array[:,num_conf]
-                
-                #create dictionary for one configuration
-                conf_dict = {}
-                conf_dict["conf"] = conf
-                #conf_dict["conf"].to(device)
-                conf_dict["mu"] = mu
-                
-                mu_crit = torch.tensor(0.94)
-                
-                #conf_dict["phase"] = (torch.sign(mu - mu_crit)+1)//2
-                conf_dict["phase"] = ((mu - mu_crit).sign()+1)//2 
-                
-                #attach all labels to dict
-                for label_i in range(len(self.label_names)):
-                    label[label_i]
-                    conf_dict[self.label_names[label_i]] = label[label_i]
-                conf_dict["id"] = idx
-            
-                #save conf_dict to data. This is the actual dataset!
-                self.data.append(conf_dict)
-                
-                if num_conf == start_conf and conf_file_i == 0:
-                    print("first example loaded:")
-                    print(conf_dict)
+            #print(f"conf_file_i {conf_file_i}")
 
-                    
-                #increase conf id by one for next example
-                idx +=1
-        
+            #read in configuration, reshape it and load it to device as a torch tensor
+            h5py_file = h5py.File(self.conf_file_paths[conf_file_i], "r")
+            
+            ##get keys form the dataset
+            ##iterable object!
+            h5py_keys = h5py_file.keys()
+            num_confs = len(h5py_file['y'])
+            #print(f"number of confs: {num_confs}")
+            
+            file_i_data_params = {}
+            
+            for conf_i in range(num_confs):
+                #print(f"conf_i {conf_i}")
+                conf_dict = {}
+            
+                #load labels
+                for key in h5py_keys:
+
+                    key_data = h5py_file[key]
+
+                    if key in self.params_names:
+                        self.params[key] = key_data
+                    else:
+                        key_data_i = h5py_file[key][conf_i]
+                        #conf_dict[key] = torch.tensor(h5py_file[key][conf_i])
+                        conf_dict[key] = key_data_i
+                
+                if conf_i == 0 and conf_file_i == 0:
+                    print("first example loaded")
+                    print(conf_dict)
+                
+                self.data.append(conf_dict)
+
+            
+            print(f"Read conf file number {conf_file_i} {self.conf_file_paths[conf_file_i]}")
+
         print("last example loaded:")
         print(conf_dict)
         
         self.length = len(self.data)
         
-        self.label_names = self.label_names + self.labels_in_file_name
+        #self.label_names = 
 
         #define custom transform
         #if transform == "default":
@@ -184,8 +148,13 @@ class kl_dataset(torch.utils.data.Dataset):
         #for one training example
         #and return it
         
-        #conf_lat_links = self.data[idx]["conf"].reshape(tuple(self.conf_size))
-        conf_lat_links = self.data[idx]["conf"].reshape(tuple(self.output_size))
+        
+        u_links = self.data[idx]["u"]
+        w = self.data[idx]["w"]
+        
+        #conf = torch.cat([u_links, w]).reshape(self.output_size)
+        conf = np.concatenate([u_links, w], axis=1).reshape(self.output_size)
+        
         
         labels = []
         for label_name in self.train_label_names:
@@ -193,7 +162,9 @@ class kl_dataset(torch.utils.data.Dataset):
         labels = torch.tensor(labels)
         #labels = torch.tensor(labels, device=self.device)
         
-        return (conf_lat_links, labels)
+        conf = utils.np_complex_to_channel(conf, channel_axis=-1)
+        
+        return (conf, labels)
             
         #if self.transform is not None:
         #    return (self.transform(conf_lat_links), labels)
@@ -201,28 +172,6 @@ class kl_dataset(torch.utils.data.Dataset):
         #else:
         #    return (conf_lat_links, labels)
         
-    def get_conf(self, idx):
-        #load features
-        #load labels
-        #for one training example
-        #and return it
-        
-        #conf_lat_links = self.data[idx]["conf"].reshape(tuple(self.conf_size))
-        conf_lat_links = self.data[idx]["conf"].reshape(tuple(self.output_size))
-        
-        labels = []
-        for label_name in self.train_label_names:
-            labels.append(self.data[idx][label_name])
-        labels = torch.tensor(labels)
-        #labels = torch.tensor(labels, device=self.device)
-        
-        return (conf_lat_links, labels)
-            
-        #if self.transform is not None:
-        #    return (self.transform(conf_lat_links), labels)
-        #    #return (self.lat_translation(conf_lat_links, axes = [1,2]), label)
-        #else:
-        #    return (conf_lat_links, labels)
 
     def filter_indices_label_vals(self, label_names, label_values, remove=False):
         

@@ -267,7 +267,7 @@ class Net(CustomNet):
     def forward(self, input_data):
 
         x = input_data
-        #print(x.shape)
+        print(x.shape)
         
         """
         iterate through all layers and perform calculation
@@ -275,7 +275,7 @@ class Net(CustomNet):
         
         for layer_i in range(len(self.layers)):
             #print(layer_i)
-            #print(x.shape)
+            print(x.shape)
             z = self.layers[layer_i](x)
             if "act_func" in self.net_struct[layer_i]:
                 x = self.net_struct[layer_i]["act_func"](z)
