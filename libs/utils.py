@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
+import sys
+
 from sklearn.model_selection import train_test_split,KFold
 
 from torch import reshape
@@ -10,19 +12,24 @@ from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SubsetRandomSampler
 from torch.autograd import Variable
 
+
+import misc_modules
+import conv4d
+import circ_padding
+
+
+#from misc_modules import *
+#from conv4d import *
+#from circ_padding import *
+
 import matplotlib.pyplot as plt
 
-class Reshape(nn.Module):
-    def __init__(self, new_shape=[-1]):
-        super(Reshape, self).__init__()
-        self.shape = new_shape
-        self.batch_shape = np.concatenate( ([-1],self.shape) )
+def np_complex_to_channel(x, channel_axis=0):
+    re_x = x.real
+    im_x = x.imag
 
-    def forward(self, x):
-        #return x.view(self.shape)
-        #print(tuple( np.concatenate(([-1],self.shape)) ))
-        return reshape(x, tuple(self.batch_shape))
-
+    return np.concatenate((re_x, im_x), axis=channel_axis)
+    
 """
 #Return splitted data in the form of a list of Pytorch DataLoaders
 #method = "holdout": method _pars = {"train" : 0.8, "val" : 0.1, "test" : 0.}
@@ -113,16 +120,15 @@ def load_split_indices(dataset, batch_size=1, method="kfold", method_pars=None, 
         print(f"size of val set :{len(val_indices)}\n")
         print(f"size of train set :{len(train_indices)}\n")
         
-            
-        return [[train_indices, val_indices, test_indices]]
-    elif method == "kfold":
-        """NOT WORKING ATM"""
-        k = method_pars
-        kf = KFold(n_splits=k, shuffle=shuffle, random_state=random_seed)
-        kfold_indices = kf.split(all_indices)
-        
-
-        return kfold_indices
+        split_indices = {"train": train_indices, "val": val_indices, "test": test_indices} 
+        return split_indices    
+        #return [[train_indices, val_indices, test_indices]]
+#    elif method == "kfold":
+#        """NOT WORKING ATM"""
+#        k = method_pars
+#        kf = KFold(n_splits=k, shuffle=shuffle, random_state=random_seed)
+#        kfold_indices = kf.split(all_indices)
+#        return kfold_indices
     
 def split_shuffle_indices(all_indices, fractions=[0.5,0.5], shuffle=True, random_seed=42, log_file=None):
     
@@ -337,6 +343,7 @@ def calc_layer_sizes(input_shape, net_struct, log_file=None):
     #layer_sizes will have shape
     #[[channels,length,width],...,dense_neurons,...]
     layer_sizes = [input_shape]
+    #print(f"input_shape: {input_shape}")
     
     #go through each layer
     for i in range(len(net_struct)):
@@ -350,15 +357,38 @@ def calc_layer_sizes(input_shape, net_struct, log_file=None):
         elif net_struct[i]["type"] == nn.Flatten:
             new_layer_size = int(np.prod(layer_sizes[-1]))
         
-        elif net_struct[i]["type"] == Reshape:
+        elif net_struct[i]["type"] == misc_modules.Reshape:
             new_layer_size = net_struct[i]["layer_pars"]["new_shape"]
             
+        elif net_struct[i]["type"] == misc_modules.NpSplitReImToChannel:
+            channel = net_struct[i]["layer_pars"]["channel_axis"]
+            prev_layer_size = layer_sizes[-1].copy()
+            new_layer_size = prev_layer_size
+            new_layer_size[channel] *= 2
+            
+        elif net_struct[i]["type"] == misc_modules.PermuteAxes:
+            perm = net_struct[i]["layer_pars"]["perm"]
+            prev_layer_size = layer_sizes[-1].copy()
+            new_layer_size = prev_layer_size[perm]
+            
+        elif net_struct[i]["type"] == circ_padding.CircularPadding:
+            perm = net_struct[i]["layer_pars"]["padding"]
+            prev_layer_size = layer_sizes[-1].copy()
+            new_layer_size = prev_layer_size
+            
+            for layer_d in range(len(prev_layer_size)):
+                new_layer_size[layer_d] += 2*net_struct[i]["layer_pars"]["padding"][layer_d]
+
+            
         #elif (net_struct[i]["type"] == nn.Conv2d) or (net_struct[i]["type"] == nn.MaxPool2d):
-        elif net_struct[i]["type"] in [nn.Conv2d, nn.MaxPool2d, nn.AvgPool2d]:
+        #elif net_struct[i]["type"] in [nn.Conv2d, nn.MaxPool2d, nn.AvgPool2d]:
+        elif net_struct[i]["type"] in [nn.Conv1d, nn.Conv2d, nn.Conv3d, conv4d.Conv4d, nn.MaxPool2d, nn.AvgPool2d]:
+        #elif net_struct[i]["type"] in [nn.Conv1d, nn.Conv2d, nn.Conv3d, Conv4d, nn.MaxPool2d, nn.AvgPool2d]:
             
             kernel_shape = net_struct[i]["layer_pars"]["kernel_size"]
             
-            if net_struct[i]["type"] == nn.Conv2d:
+            #if net_struct[i]["type"] == nn.Conv2d:
+            if net_struct[i]["type"] in [nn.Conv1d, nn.Conv2d, nn.Conv3d, conv4d.Conv4d]:
                 stride = [1 for i in range(len(kernel_shape))]
             else:
                 stride = kernel_shape
@@ -412,24 +442,25 @@ def calc_layer_sizes(input_shape, net_struct, log_file=None):
                     
                 if type(dilation) == int:
                     dilation_l = dilation
-                elif type(padding) == list:
+                elif type(dilation) == list:
                     dilation_l = int(dilation[d])
-
-                #actual computation
-                #if (prev_layer_l + 2*padding_l - kernel_l) % stride_l == 0:
-                if (prev_layer_l + 2*padding_l - dilation_l*(kernel_l - 1) - 1) % stride_l == 0:
-                    #new_layer_size_l = (prev_layer_l + 2*padding_l - kernel_l)//stride_l + 1
-                    new_layer_size_l = int(np.floor( (prev_layer_l + 2*padding_l - dilation_l*(kernel_l - 1) - 1)/(stride_l) + 1.))
-                    new_layer_size.append( new_layer_size_l )
-                else:
-                    #pass
-                    print(f"Input {layer_sizes[-1]} not compatible with:")
+                    
+                if (prev_layer_l + 2*padding_l - dilation_l*(kernel_l - 1) - 1) % stride_l != 0:
+                    print(f"Input {layer_sizes[-1]} maybe not compatible with:")
                     print(net_struct[i]['layer_pars'])
                     #raise ValueError(f'Input {layer_sizes[-1]}, kernel {kernel_shape}, stride {stride} and padding {padding} in layer {i} not compatible!')
+
+                #actual computation
+
+                new_layer_size_l = int(np.floor( (prev_layer_l + 2*padding_l - dilation_l*(kernel_l - 1) - 1)/(stride_l) + 1.))
+                new_layer_size.append( new_layer_size_l )
+                
                 #print(f"new layer {new_layer_size}")
 
-            if net_struct[i]["type"] == nn.Conv2d:
+            #if net_struct[i]["type"] == nn.Conv2d:
+            if net_struct[i]["type"] in [nn.Conv1d, nn.Conv2d, nn.Conv3d, conv4d.Conv4d]:
                 new_layer_size = [net_struct[i]["layer_pars"]["out_channels"]] + new_layer_size
+                
             elif net_struct[i]["type"] in [nn.MaxPool2d, nn.AvgPool2d]:
                 prev_channels = layer_sizes[-1][0]
                 new_layer_size = [prev_channels] + new_layer_size
@@ -459,6 +490,13 @@ def calc_layer_sizes(input_shape, net_struct, log_file=None):
             new_layer_size = [net_struct[i]["layer_pars"]["out_channels"]] + new_layer_size
         
         #elif (net_struct[i]["type"] == nn.BatchNorm1d) or (net_struct[i]["type"] == nn.Dropout) or (net_struct[i]["type"] == nn.Softmax):
+        
+        elif net_struct[i]["type"] in [nn.AdaptiveAvgPool1d, nn.AdaptiveAvgPool2d, nn.AdaptiveAvgPool3d]:
+            """Append channel sizes from last layer"""
+            new_layer_size = layer_sizes[-1].copy()
+            d = len(net_struct[i]["layer_pars"]["output_size"])
+            new_layer_size[-d:] = net_struct[i]["layer_pars"]["output_size"][:]
+        
         elif net_struct[i]["type"] in [nn.BatchNorm1d, nn.Dropout, nn.Softmax]:
             new_layer_size = layer_sizes[-1]
         
@@ -467,9 +505,10 @@ def calc_layer_sizes(input_shape, net_struct, log_file=None):
             new_layer_size = layer_sizes[-1]
         
         #append newly calculated neuron activation shape to layer_sizes
-        if np.any(np.array(new_layer_size) < 0):
-            pass
+        if np.any(np.array(new_layer_size) <= 0):
             #raise ValueError(f'Negative layer size found in {new_layer_size}!')
+            print(f'Negative layer size found in {new_layer_size}!')
+            
         layer_sizes.append(new_layer_size)
     
     return layer_sizes
