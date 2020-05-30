@@ -378,6 +378,14 @@ def calc_layer_sizes(input_shape, net_struct, log_file=None):
             
             for layer_d in range(len(prev_layer_size)):
                 new_layer_size[layer_d] += 2*net_struct[i]["layer_pars"]["padding"][layer_d]
+                
+        elif net_struct[i]["type"] == circ_padding.AsymmetricCircularPadding:
+            perm = net_struct[i]["layer_pars"]["padding"]
+            prev_layer_size = layer_sizes[-1].copy()
+            new_layer_size = prev_layer_size
+            
+            for layer_d in range(len(prev_layer_size)):
+                new_layer_size[layer_d] += net_struct[i]["layer_pars"]["padding"][layer_d]
 
             
         #elif (net_struct[i]["type"] == nn.Conv2d) or (net_struct[i]["type"] == nn.MaxPool2d):
