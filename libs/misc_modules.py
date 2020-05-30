@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
+
 class Reshape(nn.Module):
     def __init__(self, new_shape=[-1]):
         super(Reshape, self).__init__()
@@ -12,7 +13,7 @@ class Reshape(nn.Module):
     def forward(self, x):
         #return x.view(self.shape)
         #print(tuple( np.concatenate(([-1],self.shape)) ))
-        return reshape(x, tuple(self.batch_shape))
+        return torch.reshape(x, tuple(self.batch_shape))
     
     
 class PermuteAxes(nn.Module):
@@ -36,7 +37,16 @@ class PermuteAxes(nn.Module):
         #return x
         return x.permute(*self.perm)
     
-    
+
+class Mean(nn.Module):
+    def __init__(self,dim=0):
+        super(Mean, self).__init__()
+        #batch axis!
+        self.dim = dim + 1
+        
+    def forward(self, x):
+        return torch.mean(x,self.dim) 
+
 class NpSplitReImToChannel(nn.Module):
     def __init__(self, channel_axis=0):
         super(NpSplitReImToChannel, self).__init__()
