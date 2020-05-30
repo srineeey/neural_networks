@@ -104,7 +104,7 @@ class AsymmetricCircularPadding(nn.Module):
     
     
     def __init__(self, padding=[1]):
-        super(CircularPadding, self).__init__()
+        super(AsymmetricCircularPadding, self).__init__()
         
         #self.padding = padding
         #batch axis
