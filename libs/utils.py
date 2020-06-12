@@ -509,7 +509,8 @@ def calc_layer_sizes(input_shape, net_struct, log_file=None):
             new_layer_size = layer_sizes[-1]
         
         else:
-            #print("custom layer operation not defined, assuming previous layer_size")
+            print("custom layer operation not defined, assuming previous layer_size for")
+            print(net_struct[i]["type"])
             new_layer_size = layer_sizes[-1]
         
         #append newly calculated neuron activation shape to layer_sizes
